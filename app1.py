@@ -6,20 +6,21 @@ import sqlite3
 import json
 from datetime import datetime 
 import threading
-import logging 
 from collections import deque
 import requests
 
 def setup_database():
     '''
     Creates the database tables for storing metrics and insights.
-    timestamp, type, value, batch ID store the data
+    Store Data Timestamp, type, value, batch ID 
+    
     '''
     print("Setting up database...")
     
     conn = sqlite3.connect('metrics.db')
     cursor = conn.cursor()
     
+    # Create Table for storing metrics
     cursor.execute('''
             CREATE TABLE IF NOT EXISTS metrics (
                 timestamp TEXT,
@@ -29,10 +30,20 @@ def setup_database():
             )
         ''')
     
+    # Create Table for storing insights
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS insights (
             timestamp TEXT,
             insight_type TEXT,
+            description TEXT
+        )
+    ''')
+    
+    # Create Table for storing alerts
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS alerts (
+            timestamp TEXT,
+            alert_type TEXT,
             description TEXT
         )
     ''')
@@ -45,6 +56,11 @@ def setup_database():
 
 # Collect system metrics
 def collect_metrics():
+    '''
+    Collects system metrics such as CPU usage, memory usage, disk usage, network traffic, etc.
+    Returns a dictionary containing the current system metrics.
+    '''
+    
     metrics = {
         'cpu_percent': psutil.cpu_percent(),
         'memory_percent': psutil.virtual_memory().percent,
@@ -56,6 +72,14 @@ def collect_metrics():
     return metrics  
 
 def calculate_statistics(data_points):
+    '''
+    Calculates basic statistical measures (mean, median, std_dev, min, max)
+    for a given list of data points.
+    
+    A collection of numeric data points is passed to this function for statistical analysis.
+   
+    Returns a dictionary containing the calculated statistics.
+    '''
     if not data_points:
         return None
 
@@ -74,6 +98,13 @@ def calculate_statistics(data_points):
 
 # WAL (write-ahead-log) implementation
 def write_to_wal(data):
+    '''
+    A function for writing data to the write-ahead log (WAL).
+    
+    The data is stored in a file named "wal.log" in the current directory for later processing.
+    
+    The function takes in a dictionary containing the data to be written to the WAL.
+    '''
     print(f"Writing to WAL: {data}")
     with open('wal.log', 'a') as f:
         f.write(json.dumps(data) + '\n')
@@ -81,6 +112,12 @@ def write_to_wal(data):
 
 # Batch processing from WAL to database
 def process_wal_batch():
+    '''
+    A function for processing the WAL batch.
+
+    The function reads data from the WAL file and inserts it into the database.
+    
+    '''
     print("Processing WAL batch...")
     batched_data = []
     if not os.path.exists('wal.log'):
@@ -118,6 +155,14 @@ def process_wal_batch():
 
 # Predict future values using simple moving average
 def predict_future_value(data_points, periods=5):
+    '''
+    A function for predicting future values using simple moving average.
+    
+    The function takes in a deque of data points and the number of periods to predict.
+    
+    The function returns the predicted value.
+    
+    '''
     if len(data_points) < periods:
         return None
 
@@ -131,6 +176,10 @@ def predict_future_value(data_points, periods=5):
 
 # Generate insights
 def generate_insights(metrics_history):
+    '''
+    generate insights based on the metrics history
+    '''
+    
     insights = []
 
     for metric_type, values in metrics_history.items():
@@ -140,7 +189,7 @@ def generate_insights(metrics_history):
         if not stats:
             continue
 
-        # Trend analysis
+        # Trend analysis based on the last 3 values
         if len(values_list) >= 3:
             recent_trend = values_list[-3:]
             if all(x < y for x, y in zip(recent_trend, recent_trend[1:])):
@@ -164,9 +213,15 @@ def generate_insights(metrics_history):
 
 # Main monitoring loop
 def monitor_system(duration_minutes=15, interval_seconds=60):
+    '''
+    for the specified duration (in minutes) and interval (in seconds),
+    monitor the system and generate insights based on the metrics history
+
+    '''
     print(f"Starting system monitoring for {duration_minutes} minutes...")
     setup_database()
 
+    # Initialize metrics history deque of size 100
     metrics_history = {
         'cpu_percent': deque(maxlen=100),
         'memory_percent': deque(maxlen=100),
@@ -174,10 +229,12 @@ def monitor_system(duration_minutes=15, interval_seconds=60):
         'network_bytes_sent': deque(maxlen=100),
         'network_bytes_recv': deque(maxlen=100)
     }
-
+    
+    # Set the end time
     end_time = time.time() + (duration_minutes * 60)
     batch_id = datetime.now().strftime('%Y%m%d%H%M%S')
 
+    # Main monitoring loop running for 15 minutes in 60 second intervals
     while time.time() < end_time:
         try:
             # Collect metrics
