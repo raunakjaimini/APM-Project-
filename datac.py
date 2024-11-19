@@ -1,14 +1,15 @@
-#working code file 
- 
-
-
 import psutil
-import sqlite3
+import psycopg2  # Use psycopg2 for PostgreSQL
 import time
-import json
 from datetime import datetime
 
-DATABASE_FILE = 'met.db'
+DATABASE_CONFIG = {
+    'dbname': 'new_metrics_db',  # Change to your new database name
+    'user': 'postgres.kpcfwxpuwvwdqytccsac',  # Your PostgreSQL user
+    'password': 'R@unak87709',  # Your PostgreSQL password
+    'host': 'aws-0-ap-south-1.pooler.supabase.com',  # Database host
+    'port': '6543'  # Default PostgreSQL port
+}
 
 BATCH_SIZE = 3
 MAX_ENTRIES = 9
@@ -16,15 +17,22 @@ MAX_ENTRIES = 9
 def setup_database():
     """Sets up the database to store metrics."""
     print("[INFO] Setting up the database...")
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = psycopg2.connect(**DATABASE_CONFIG)
     cursor = conn.cursor()
 
+    # Create table with separate columns for metrics
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS metrics (
-            timestamp TEXT,
-            metrics_data TEXT
+            id SERIAL PRIMARY KEY,
+            timestamp TIMESTAMP NOT NULL,
+            cpu_percent REAL NOT NULL,
+            memory_percent REAL NOT NULL,
+            disk_percent REAL NOT NULL,
+            network_bytes_sent BIGINT NOT NULL,
+            network_bytes_recv BIGINT NOT NULL
         )
     ''')
+
     conn.commit()
     conn.close()
     print("[INFO] Database setup complete.")
@@ -44,7 +52,7 @@ def collect_metrics():
 
 def display_database_contents():
     """Displays the current contents of the database."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = psycopg2.connect(**DATABASE_CONFIG)
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM metrics ORDER BY timestamp ASC')
     rows = cursor.fetchall()
@@ -56,11 +64,15 @@ def display_database_contents():
 def store_batch(batch):
     """Stores a batch of metrics in the database."""
     print(f"[INFO] Storing a batch of {len(batch)} metrics in the database...")
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = psycopg2.connect(**DATABASE_CONFIG)
     cursor = conn.cursor()
 
     cursor.executemany(
-        'INSERT INTO metrics (timestamp, metrics_data) VALUES (?, ?)',
+        '''
+        INSERT INTO metrics (
+            timestamp, cpu_percent, memory_percent, disk_percent, network_bytes_sent, network_bytes_recv
+        ) VALUES (%s, %s, %s, %s, %s, %s)
+        ''',
         batch
     )
     conn.commit()
@@ -73,11 +85,14 @@ def store_batch(batch):
     print(f"[INFO] Total entries in the database: {total_entries}")
 
     if total_entries > MAX_ENTRIES:
-        # Delete the 3 oldest entries
-        print(f"[INFO] Removing the 3 oldest entries to maintain the database size...")
-        cursor.execute('DELETE FROM metrics WHERE rowid IN (SELECT rowid FROM metrics ORDER BY timestamp ASC LIMIT 3)')
+        # Remove the oldest entries
+        print(f"[INFO] Removing the oldest entries to maintain the database size...")
+        cursor.execute(
+            'DELETE FROM metrics WHERE id IN (SELECT id FROM metrics ORDER BY timestamp ASC LIMIT %s)',
+            (total_entries - MAX_ENTRIES,)
+        )
         conn.commit()
-        print(f"[INFO] 3 oldest entries removed.")
+        print("[INFO] Oldest entries removed.")
         display_database_contents()
 
     conn.close()
@@ -86,16 +101,23 @@ def monitor_system():
     """Monitors the system, collects data, and stores it in batches."""
     setup_database()
     batch = []
-    
+
     print("[INFO] Starting system monitoring...")
     while True:
         try:
             # Collect metrics
             current_metrics = collect_metrics()
-            timestamp = datetime.now().isoformat()
+            timestamp = datetime.now()
 
             # Prepare batch entry
-            batch.append((timestamp, json.dumps(current_metrics)))
+            batch.append((
+                timestamp,
+                current_metrics['cpu_percent'],
+                current_metrics['memory_percent'],
+                current_metrics['disk_percent'],
+                current_metrics['network_bytes_sent'],
+                current_metrics['network_bytes_recv']
+            ))
 
             print(f"[INFO] Current batch size: {len(batch)}")
 
@@ -106,8 +128,8 @@ def monitor_system():
                 batch = []  # Reset batch after storing
                 print("[INFO] Batch reset after storing.")
 
-            # Sleep for 1 minute before collecting metrics again
-            time.sleep(10)  # Collect metrics every 60 seconds
+            # Sleep for 10 seconds before collecting metrics again
+            time.sleep(10)  # Collect metrics every 10 seconds
 
         except Exception as e:
             print(f"[ERROR] Error during monitoring: {e}")

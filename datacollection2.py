@@ -1,15 +1,11 @@
-#working code file 
- 
-
-
 import psutil
 import sqlite3
 import time
 import json
+import zlib
 from datetime import datetime
 
 DATABASE_FILE = 'met.db'
-
 BATCH_SIZE = 3
 MAX_ENTRIES = 9
 
@@ -19,12 +15,23 @@ def setup_database():
     conn = sqlite3.connect(DATABASE_FILE)
     cursor = conn.cursor()
 
+    # Create table for active metrics
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS metrics (
             timestamp TEXT,
             metrics_data TEXT
         )
     ''')
+
+    # Create table for archived metrics
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS archived_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            compressed_data BLOB
+        )
+    ''')
+
     conn.commit()
     conn.close()
     print("[INFO] Database setup complete.")
@@ -73,11 +80,25 @@ def store_batch(batch):
     print(f"[INFO] Total entries in the database: {total_entries}")
 
     if total_entries > MAX_ENTRIES:
-        # Delete the 3 oldest entries
-        print(f"[INFO] Removing the 3 oldest entries to maintain the database size...")
+        # Archive and delete the 3 oldest entries
+        print(f"[INFO] Archiving the 3 oldest entries to maintain the database size...")
+        cursor.execute('SELECT rowid, timestamp, metrics_data FROM metrics ORDER BY timestamp ASC LIMIT 3')
+        oldest_entries = cursor.fetchall()
+
+        for entry in oldest_entries:
+            rowid, timestamp, metrics_data = entry
+            compressed_data = zlib.compress(metrics_data.encode('utf-8'))
+
+            # Store in archived_metrics
+            cursor.execute(
+                'INSERT INTO archived_metrics (timestamp, compressed_data) VALUES (?, ?)',
+                (timestamp, compressed_data)
+            )
+        
+        # Remove archived entries from the main table
         cursor.execute('DELETE FROM metrics WHERE rowid IN (SELECT rowid FROM metrics ORDER BY timestamp ASC LIMIT 3)')
         conn.commit()
-        print(f"[INFO] 3 oldest entries removed.")
+        print(f"[INFO] 3 oldest entries archived and removed from active metrics.")
         display_database_contents()
 
     conn.close()
