@@ -1,4 +1,0 @@
--- Active: 1732014358216@@127.0.0.1@5432@metric_db
-DROP DATABASE metric_db;
-
-CREATE DATABASE met;
