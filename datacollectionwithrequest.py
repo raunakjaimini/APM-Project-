@@ -6,6 +6,7 @@ import time
 import json
 from datetime import datetime
 import zlib  # For data compression
+import requests
 
 # Configuration for the PostgreSQL database
 DATABASE_CONFIG = {
@@ -73,6 +74,19 @@ def setup_database():
         )
     ''')
     print("[INFO] Table `thresholds` is ready.")
+
+
+    
+    # Create `endpoints` table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS endpoints (
+            id SERIAL PRIMARY KEY,
+            name_endpoints TEXT,
+            request_counts TEXT,
+            last_updated TIMESTAMP
+        )
+    ''')
+    print("[INFO] Table `endpoints` is ready.")
 
 
     conn.commit()
@@ -322,13 +336,78 @@ def main():
         DEFAULT_DISK_LEVELS = thresholds_from_db.get("disk", DEFAULT_DISK_LEVELS)
     else:
         print("[INFO] Using default static thresholds.")
+# Function to insert or update endpoint data
+
+
+def insert_endpoint_data(cursor, endpoint_name, request_count, timestamp):
+    """
+    Insert the request count and timestamp for an endpoint into the database.
+    Each entry is stored as a new row with a unique ID.
+    """
+    try:
+        # Insert a new record into the table
+        cursor.execute('''
+            INSERT INTO endpoints (name_endpoints, request_counts, last_updated)
+            VALUES (%s, %s, %s);
+        ''', (endpoint_name, request_count, timestamp))
+        print(f"[INFO] Successfully inserted data for endpoint '{endpoint_name}'.")
+    except Exception as e:
+        print(f"[ERROR] Failed to insert data for endpoint '{endpoint_name}': {e}")
+
+
+
+
+# Function to monitor request counts
+def monitor_request_counts(log_file="request_counts_log.json"):
+    """
+    Fetch and log request counts for each minute.
+    The counts are reset by the application after each fetch.
+    """
+    url = "http://localhost:8081/monitor/request_counts"
+    
+    # Connect to the database
+    conn = psycopg2.connect(**DATABASE_CONFIG)
+    cursor = conn.cursor()
+
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            log_data = {
+                "timestamp": datetime.now().isoformat(),  # Current timestamp
+                "endpoints": data.get("request_counts", {})  # Log request counts
+            }
+            
+            # # Write log data to a JSON file
+            # with open(log_file, "a") as f:
+            #     f.write(json.dumps(log_data) + "\n")
+            
+            # print(f"[{log_data['timestamp']}] Logged Request Counts: {log_data['endpoints']}")
+
+            # Insert data into the database
+            for endpoint, count in log_data["endpoints"].items():
+                insert_endpoint_data(cursor, endpoint, count, log_data["timestamp"])
+            
+            # Commit the transaction
+            conn.commit()
+        
+        else:
+            print(f"Failed to retrieve request counts. Status Code: {response.status_code}")
+    
+    except Exception as e:
+        print(f"[ERROR] Error connecting to the application: {e}")
+    
+    finally:
+        # Close the database connection
+        cursor.close()
+        conn.close()
 
 def monitor_system():
     """
     Continuously monitors the system, collects metrics, and stores them in batches.
     Manages database size by archiving old records.
     """
-    setup_database()
+    
     batch = []
 
     print("[INFO] Starting system monitoring...")
@@ -349,6 +428,9 @@ def monitor_system():
             
             print(f"[INFO] Metrics collected and added to the batch. Current batch : {batch}")
             print(f"[INFO] Current batch size: {len(batch)}")
+            # Log file location
+            log_file_name = "request_counts_log.json"
+            monitor_request_counts(log_file_name)
 
             # If batch size limit is reached, store the batch and reset it
             if len(batch) >= BATCH_SIZE:
@@ -362,7 +444,7 @@ def monitor_system():
             time.sleep(10)
 
         except Exception as e:
-            print(f"[ERROR] Error during monitoring: {e}") 
+            print(f"[ERROR] Error during monitoring: {e}")
 
 if __name__ == "__main__":
     print("[INFO] Starting the metrics collection script...")
