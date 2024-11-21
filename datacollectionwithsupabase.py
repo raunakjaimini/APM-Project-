@@ -328,7 +328,7 @@ def monitor_system():
     Continuously monitors the system, collects metrics, and stores them in batches.
     Manages database size by archiving old records.
     """
-    
+    setup_database()
     batch = []
 
     print("[INFO] Starting system monitoring...")
