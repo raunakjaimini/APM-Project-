@@ -1,3 +1,5 @@
+# working code for datacollectionwithsupabase
+
 import psutil
 import psycopg2  # PostgreSQL library for Python
 import time
@@ -21,6 +23,12 @@ BATCH_SIZE = 3
 
 # Maximum number of entries allowed in the `metrics` table
 MAX_ENTRIES = 9
+
+# Global DEFCON levels
+DEFAULT_CPU_LEVELS = [0, 70, 80, 85, 90, 95, 100]
+DEFAULT_RAM_LEVELS = [0, 70, 80, 85, 90, 95, 100]
+DEFAULT_DISK_LEVELS = [100, 50, 30, 25, 15, 5, 0]
+
 
 def setup_database():
     """
@@ -54,11 +62,62 @@ def setup_database():
             compressed_data BYTEA
         )
     ''')
+    
     print("[INFO] Table `metrics_archive` is ready.")
+    # Create `thresholds` table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS thresholds (
+            id SERIAL PRIMARY KEY,
+            metric_type TEXT UNIQUE,
+            levels TEXT
+        )
+    ''')
+    print("[INFO] Table `thresholds` is ready.")
+
 
     conn.commit()
     conn.close()
     print("[INFO] Database setup complete.")
+
+def get_thresholds_from_db():
+    """
+    Fetches alert thresholds from the database. If not present, returns None.
+    """
+    conn = psycopg2.connect(**DATABASE_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute('SELECT metric_type, levels FROM thresholds')
+    rows = cursor.fetchall()
+    conn.close()
+
+    thresholds = {}
+    for metric_type, levels in rows:
+        thresholds[metric_type] = json.loads(levels)
+
+    return thresholds if thresholds else None
+
+def update_thresholds_in_db(cpu_levels, ram_levels, disk_levels):
+    """
+    Updates or inserts new alert thresholds into the database.
+    """
+    conn = psycopg2.connect(**DATABASE_CONFIG)
+    cursor = conn.cursor()
+
+    # Upsert logic for thresholds
+    for metric, levels in zip(
+        ["cpu", "ram", "disk"],
+        [cpu_levels, ram_levels, disk_levels]
+    ):
+        cursor.execute('''
+            INSERT INTO thresholds (metric_type, levels)
+            VALUES (%s, %s)
+            ON CONFLICT (metric_type)
+            DO UPDATE SET levels = EXCLUDED.levels
+        ''', (metric, json.dumps(levels)))
+
+    conn.commit()
+    conn.close()
+    print("[INFO] Thresholds updated in the database.")
+
 
 def collect_metrics():
     """
@@ -69,7 +128,7 @@ def collect_metrics():
     metrics = {
         'cpu_percent': psutil.cpu_percent(),
         'memory_percent': psutil.virtual_memory().percent,
-        'disk_percent': psutil.disk_usage('/').percent,
+        'disk_percent': 100 - psutil.disk_usage('/').percent,
         'network_bytes_sent': psutil.net_io_counters().bytes_sent,
         'network_bytes_recv': psutil.net_io_counters().bytes_recv
     }
@@ -165,12 +224,111 @@ def move_and_delete_oldest_entries(cursor, excess_entries):
     cursor.execute(f'DELETE FROM metrics WHERE id IN (SELECT id FROM metrics ORDER BY timestamp ASC LIMIT {excess_entries})')
     print(f"[INFO] Archived and deleted {len(oldest_entries)} entries from the `metrics` table.")
 
+def get_alert_level(value, thresholds, descending=False):
+    """
+    Determines the DEFCON level for a given value based on thresholds.
+    """
+    if descending:
+        thresholds = thresholds[::-1]
+    for i, threshold in enumerate(thresholds):
+        if value <= threshold:
+            return i + 1
+    return len(thresholds)
+
+def alert_system(cpu, ram, disk):
+    """
+    Checks the system metrics against DEFCON thresholds and triggers alerts with colors.
+    :param cpu: CPU usage percentage.
+    :param ram: RAM usage percentage.
+    :param disk: Disk usage percentage.
+    """
+    cpu_level = get_alert_level(cpu, DEFAULT_CPU_LEVELS)
+    ram_level = get_alert_level(ram, DEFAULT_RAM_LEVELS)
+    disk_level = 8-get_alert_level(disk, DEFAULT_DISK_LEVELS, descending=True)
+
+    cpu_color = get_alert_color(cpu_level)
+    ram_color = get_alert_color(ram_level)
+    disk_color = get_alert_color(disk_level)
+
+    print(f"CPU Alert: DEFCON {cpu_level} ({cpu_color})")
+    print(f"RAM Alert: DEFCON {ram_level} ({ram_color})")
+    print(f"Disk Alert: DEFCON {disk_level} ({disk_color})")
+
+def get_sorted_input(prompt, order="asc"):
+    """
+    Helper function to get a sorted list of unique values from the user.
+    """
+    while True:
+        try:
+            print(prompt)
+            values = list(map(int, input("Enter 5 unique numbers separated by spaces: ").split()))
+            if len(set(values)) != 5:
+                print("Please enter exactly 5 unique numbers.")
+                continue
+            values = [0] + sorted(values) + [100]
+            if order == "desc":
+                values = [100] + sorted(values[1:-1], reverse=True) + [0]
+            return values
+        except ValueError:
+            print("Invalid input. Please enter numeric values only.")
+
+
+
+def get_alert_color(defcon_level):
+    """
+    Maps a DEFCON level to a specific color.
+    :param defcon_level: DEFCON level as an integer (1 to 6).
+    :return: Corresponding alert color.
+    """
+    colors = {
+        1: "Blue",
+        2: "Green",
+        3: "Yellow",
+        4: "Orange",
+        5: "Red",
+        6: "White"  # Optional: Handle cases above the highest DEFCON level
+    }
+    return colors.get(defcon_level, "Unknown")
+
+# def main():
+#     run = input('Want to update the Alert Level Configuration [y/n]')
+#     if run.lower() == 'y':
+#         global DEFAULT_CPU_LEVELS, DEFAULT_RAM_LEVELS, DEFAULT_DISK_LEVELS
+#         DEFAULT_CPU_LEVELS = get_sorted_input("Enter CPU usage thresholds:")
+#         DEFAULT_RAM_LEVELS = get_sorted_input("Enter RAM usage thresholds:")
+#         DEFAULT_DISK_LEVELS = get_sorted_input("Enter Disk usage thresholds (descending):", order="desc")
+
+def main():
+    """
+    Main function to configure thresholds and start monitoring.
+    """
+    setup_database()
+    run = input('Want to update the Alert Level Configuration [y/n]? ').lower()
+    thresholds_from_db = get_thresholds_from_db()
+
+    global DEFAULT_CPU_LEVELS, DEFAULT_RAM_LEVELS, DEFAULT_DISK_LEVELS
+
+    if run == 'y':
+        DEFAULT_CPU_LEVELS = get_sorted_input("Enter CPU usage thresholds:")
+        DEFAULT_RAM_LEVELS = get_sorted_input("Enter RAM usage thresholds:")
+        DEFAULT_DISK_LEVELS = get_sorted_input("Enter Disk usage thresholds (descending):", order="desc")
+
+        # Update thresholds in the database
+        update_thresholds_in_db(DEFAULT_CPU_LEVELS, DEFAULT_RAM_LEVELS, DEFAULT_DISK_LEVELS)
+    elif thresholds_from_db:
+        # Load thresholds from the database
+        DEFAULT_CPU_LEVELS = thresholds_from_db.get("cpu", DEFAULT_CPU_LEVELS)
+        DEFAULT_RAM_LEVELS = thresholds_from_db.get("ram", DEFAULT_RAM_LEVELS)
+        DEFAULT_DISK_LEVELS = thresholds_from_db.get("disk", DEFAULT_DISK_LEVELS)
+    else:
+        print("[INFO] Using default static thresholds.")
+
 def monitor_system():
     """
     Continuously monitors the system, collects metrics, and stores them in batches.
     Manages database size by archiving old records.
     """
-    setup_database()
+    
     batch = []
 
     print("[INFO] Starting system monitoring...")
@@ -179,17 +337,24 @@ def monitor_system():
             # Collect metrics
             current_metrics = collect_metrics()
             timestamp = datetime.now().isoformat()
-
+            
+            alert_system(
+                cpu=current_metrics['cpu_percent'],
+                ram=current_metrics['memory_percent'],
+                disk=current_metrics['disk_percent']
+            )
             # Add the collected metrics to the batch
             batch.append((timestamp, current_metrics['cpu_percent'], current_metrics['memory_percent'],
                           current_metrics['disk_percent'], current_metrics['network_bytes_sent'], current_metrics['network_bytes_recv']))
-
+            
+            print(f"[INFO] Metrics collected and added to the batch. Current batch : {batch}")
             print(f"[INFO] Current batch size: {len(batch)}")
 
             # If batch size limit is reached, store the batch and reset it
             if len(batch) >= BATCH_SIZE:
                 print("[INFO] Batch size limit reached. Storing the batch...")
                 store_batch(batch)
+                
                 batch = []  # Reset the batch
                 print("[INFO] Batch reset after storing.")
 
@@ -201,4 +366,5 @@ def monitor_system():
 
 if __name__ == "__main__":
     print("[INFO] Starting the metrics collection script...")
+    main()
     monitor_system()
