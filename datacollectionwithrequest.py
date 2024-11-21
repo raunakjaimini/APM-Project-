@@ -387,31 +387,7 @@ def store_alert_in_db(metric, defcon_level, alert_color):
 #         DEFAULT_RAM_LEVELS = get_sorted_input("Enter RAM usage thresholds:")
 #         DEFAULT_DISK_LEVELS = get_sorted_input("Enter Disk usage thresholds (descending):", order="desc")
 
-def main():
-    """
-    Main function to configure thresholds and start monitoring.
-    """
-    setup_database()
-    run = input('Want to update the Alert Level Configuration [y/n]? ').lower()
-    thresholds_from_db = get_thresholds_from_db()
 
-    global DEFAULT_CPU_LEVELS, DEFAULT_RAM_LEVELS, DEFAULT_DISK_LEVELS
-
-    if run == 'y':
-        DEFAULT_CPU_LEVELS = get_sorted_input("Enter CPU usage thresholds:")
-        DEFAULT_RAM_LEVELS = get_sorted_input("Enter RAM usage thresholds:")
-        DEFAULT_DISK_LEVELS = get_sorted_input("Enter Disk usage thresholds (descending):", order="desc")
-
-        # Update thresholds in the database
-        update_thresholds_in_db(DEFAULT_CPU_LEVELS, DEFAULT_RAM_LEVELS, DEFAULT_DISK_LEVELS)
-    elif thresholds_from_db:
-        # Load thresholds from the database
-        DEFAULT_CPU_LEVELS = thresholds_from_db.get("cpu", DEFAULT_CPU_LEVELS)
-        DEFAULT_RAM_LEVELS = thresholds_from_db.get("ram", DEFAULT_RAM_LEVELS)
-        DEFAULT_DISK_LEVELS = thresholds_from_db.get("disk", DEFAULT_DISK_LEVELS)
-    else:
-        print("[INFO] Using default static thresholds.")
-# Function to insert or update endpoint data
 
 
 def insert_endpoint_data(cursor, endpoint_name, request_count, avg_response_time, timestamp):
@@ -523,8 +499,8 @@ def monitor_request_counts(log_file="request_counts_log.json"):
             
 
             # Append log to the JSON file
-            with open(log_file, "a") as f:
-                f.write(json.dumps(log_data) + "\n")
+            # with open(log_file, "a") as f:
+            #     f.write(json.dumps(log_data) + "\n")
             
             # Print for monitoring purposes
             print(f"[{log_data['timestamp']}] Logged Data: {log_data['endpoints']}")
@@ -591,6 +567,32 @@ def monitor_request_counts(log_file="request_counts_log.json"):
 #         cursor.close()
 #         conn.close()
         
+
+def main():
+    """
+    Main function to configure thresholds and start monitoring.
+    """
+    setup_database()
+    run = input('Want to update the Alert Level Configuration [y/n]? ').lower()
+    thresholds_from_db = get_thresholds_from_db()
+
+    global DEFAULT_CPU_LEVELS, DEFAULT_RAM_LEVELS, DEFAULT_DISK_LEVELS
+
+    if run == 'y':
+        DEFAULT_CPU_LEVELS = get_sorted_input("Enter CPU usage thresholds:")
+        DEFAULT_RAM_LEVELS = get_sorted_input("Enter RAM usage thresholds:")
+        DEFAULT_DISK_LEVELS = get_sorted_input("Enter Disk usage thresholds (descending):", order="desc")
+
+        # Update thresholds in the database
+        update_thresholds_in_db(DEFAULT_CPU_LEVELS, DEFAULT_RAM_LEVELS, DEFAULT_DISK_LEVELS)
+    elif thresholds_from_db:
+        # Load thresholds from the database
+        DEFAULT_CPU_LEVELS = thresholds_from_db.get("cpu", DEFAULT_CPU_LEVELS)
+        DEFAULT_RAM_LEVELS = thresholds_from_db.get("ram", DEFAULT_RAM_LEVELS)
+        DEFAULT_DISK_LEVELS = thresholds_from_db.get("disk", DEFAULT_DISK_LEVELS)
+    else:
+        print("[INFO] Using default static thresholds.")
+# Function to insert or update endpoint data
 
 
 def monitor_system():
