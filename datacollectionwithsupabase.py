@@ -197,7 +197,7 @@ def monitor_system():
             time.sleep(10)
 
         except Exception as e:
-            print(f"[ERROR] Error during monitoring: {e}")
+            print(f"[ERROR] Error during monitoring: {e}") 
 
 if __name__ == "__main__":
     print("[INFO] Starting the metrics collection script...")
