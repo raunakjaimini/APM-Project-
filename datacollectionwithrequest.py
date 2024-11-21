@@ -76,17 +76,29 @@ def setup_database():
     print("[INFO] Table `thresholds` is ready.")
 
 
-    
-    # Create `endpoints` table
+# Create `endpoints` table with request count and average response time
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS endpoints (
             id SERIAL PRIMARY KEY,
-            name_endpoints TEXT,
-            request_counts TEXT,
-            last_updated TIMESTAMP
+            name_endpoint TEXT NOT NULL,  
+            request_count INTEGER NOT NULL,  
+            avg_response_time FLOAT NOT NULL,  
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP 
         )
     ''')
     print("[INFO] Table `endpoints` is ready.")
+    
+    # create system_alerts table 
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS system_alerts (
+            id SERIAL PRIMARY KEY,
+            metric VARCHAR(10),        -- Metric type (e.g., "CPU", "RAM", "Disk")
+            defcon_level INTEGER,      -- DEFCON level
+            alert_color VARCHAR(10),   -- Alert color
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')    
+    print("[INFO] Table `alert table` is ready.")
 
 
     conn.commit()
@@ -267,6 +279,11 @@ def alert_system(cpu, ram, disk):
     print(f"CPU Alert: DEFCON {cpu_level} ({cpu_color})")
     print(f"RAM Alert: DEFCON {ram_level} ({ram_color})")
     print(f"Disk Alert: DEFCON {disk_level} ({disk_color})")
+    
+    # Store alerts in the database
+    store_alert_in_db("CPU", cpu_level, cpu_color)
+    store_alert_in_db("RAM", ram_level, ram_color)
+    store_alert_in_db("Disk", disk_level, disk_color)
 
 def get_sorted_input(prompt, order="asc"):
     """
@@ -304,6 +321,64 @@ def get_alert_color(defcon_level):
     }
     return colors.get(defcon_level, "Unknown")
 
+from psycopg2 import sql, connect
+
+# Database configuration
+DATABASE_CONFIG = {
+    'dbname': 'postgres',
+    'user': 'postgres.cwkrmwnrdglcuffvlhss',
+    'password': 'R@unak87709',
+    'host': 'aws-0-ap-south-1.pooler.supabase.com',
+    'port': '6543'
+}
+
+def get_db_connection():
+    """
+    Establishes and returns a database connection using DATABASE_CONFIG.
+    """
+    try:
+        return connect(
+            dbname=DATABASE_CONFIG['dbname'],
+            user=DATABASE_CONFIG['user'],
+            password=DATABASE_CONFIG['password'],
+            host=DATABASE_CONFIG['host'],
+            port=DATABASE_CONFIG['port']
+        )
+    except Exception as e:
+        print(f"Error connecting to the database: {e}")
+        raise
+
+def store_alert_in_db(metric, defcon_level, alert_color):
+    """
+    Stores an alert message in the database.
+    :param metric: The metric type (CPU, RAM, or Disk).
+    :param defcon_level: The DEFCON level.
+    :param alert_color: The alert color.
+    """
+    try:
+        # Establish the database connection
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # SQL query to insert an alert
+        insert_query = sql.SQL(
+            "INSERT INTO system_alerts (metric, defcon_level, alert_color) VALUES (%s, %s, %s)"
+        )
+
+        # Execute the query with provided data
+        cursor.execute(insert_query, (metric, defcon_level, alert_color))
+        conn.commit()
+
+        # Close the cursor and connection
+        cursor.close()
+        conn.close()
+
+        print(f"Alert stored in database: {metric} DEFCON {defcon_level} ({alert_color})")
+    except Exception as e:
+        print(f"Error storing alert: {e}")
+
+
+
 # def main():
 #     run = input('Want to update the Alert Level Configuration [y/n]')
 #     if run.lower() == 'y':
@@ -311,6 +386,187 @@ def get_alert_color(defcon_level):
 #         DEFAULT_CPU_LEVELS = get_sorted_input("Enter CPU usage thresholds:")
 #         DEFAULT_RAM_LEVELS = get_sorted_input("Enter RAM usage thresholds:")
 #         DEFAULT_DISK_LEVELS = get_sorted_input("Enter Disk usage thresholds (descending):", order="desc")
+
+
+
+
+def insert_endpoint_data(cursor, endpoint_name, request_count, avg_response_time, timestamp):
+    """
+    Insert the request count, average response time, and timestamp for an endpoint into the database.
+    If the endpoint already exists, it will not update the existing record.
+    """
+    try:
+        # Insert the data into the `endpoints` table
+        cursor.execute('''
+            INSERT INTO endpoints (name_endpoint, request_count, avg_response_time, last_updated)
+            VALUES (%s, %s, %s, %s);
+        ''', (endpoint_name, request_count, avg_response_time, timestamp))
+
+        print(f"[INFO] Successfully inserted data for endpoint '{endpoint_name}' with average response time {avg_response_time}.")
+    except Exception as e:
+        print(f"[ERROR] Failed to insert data for endpoint '{endpoint_name}': {e}")
+
+
+
+
+
+
+# def monitor_request_counts(log_file="request_counts_log.json"):
+#     """
+#     Fetch and log request counts and average response times for each endpoint.
+#     The counts and response times are reset by the application after each fetch.
+#     """
+#     url = "http://localhost:8081/monitor/request_counts"
+#     # Connect to the database
+#     conn = psycopg2.connect(**DATABASE_CONFIG)
+#     cursor = conn.cursor()
+#     try:
+#         response = requests.get(url)
+#         if response.status_code == 200:
+#             data = response.json()
+#             request_counts = data.get("request_counts", {})
+#             total_response_times = data.get("total_response_times", {})
+
+#             # Calculate average response times
+#             avg_response_times = {
+#                 endpoint: (total_response_times.get(endpoint, 0.0) / count if count > 0 else 0.0)
+#                 for endpoint, count in request_counts.items()
+#             }
+
+#             # Prepare log data
+#             log_data = {
+#                 "timestamp": datetime.now().isoformat(),  # Current timestamp
+#                 "endpoints": {
+#                     endpoint: {
+#                         "request_count": request_counts.get(endpoint, 0),
+#                         "average_response_time": avg_response_times.get(endpoint, 0.0)
+#                     }
+#                     for endpoint in request_counts
+#                 }
+#             }
+#             # Commit the transaction
+#             conn.commit()
+
+#             # Append log to the JSON file
+#             with open(log_file, "a") as f:
+#                 f.write(json.dumps(log_data) + "\n")
+            
+#             # Print for monitoring purposes
+#             print(f"[{log_data['timestamp']}] Logged Data: {log_data['endpoints']}")
+#         else:
+#             print(f"Failed to retrieve request counts. Status Code: {response.status_code}")
+#     except Exception as e:
+#         print(f"Error connecting to the application: {e}")
+        
+#     finally:
+#         # Close the database connection
+#         cursor.close()
+#         conn.close()
+def monitor_request_counts(log_file="request_counts_log.json"):
+    """
+    Fetch and log request counts and average response times for each endpoint.
+    The counts and response times are reset by the application after each fetch.
+    """
+    url = "http://localhost:8081/monitor/request_counts"
+    # Connect to the database
+    conn = psycopg2.connect(**DATABASE_CONFIG)
+    cursor = conn.cursor()
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            request_counts = data.get("request_counts", {})
+            total_response_times = data.get("total_response_times", {})
+
+            # Calculate average response times
+            avg_response_times = {
+                endpoint: (total_response_times.get(endpoint, 0.0) / count if count > 0 else 0.0)
+                for endpoint, count in request_counts.items()
+            }
+
+            # Prepare log data
+            log_data = {
+                "timestamp": datetime.now().isoformat(),  # Current timestamp
+                "endpoints": {
+                    endpoint: {
+                        "request_count": request_counts.get(endpoint, 0),
+                        "average_response_time": avg_response_times.get(endpoint, 0.0)
+                    }
+                    for endpoint in request_counts
+                }
+            }
+
+            
+
+            # Append log to the JSON file
+            # with open(log_file, "a") as f:
+            #     f.write(json.dumps(log_data) + "\n")
+            
+            # Print for monitoring purposes
+            print(f"[{log_data['timestamp']}] Logged Data: {log_data['endpoints']}")
+
+            # Insert data into the database
+            for endpoint, data in log_data["endpoints"].items():
+                insert_endpoint_data(cursor, endpoint, data["request_count"], data["average_response_time"], log_data["timestamp"])
+            
+            # Commit the transaction
+            conn.commit()
+        else:
+            print(f"Failed to retrieve request counts. Status Code: {response.status_code}")
+    except Exception as e:
+        print(f"Error connecting to the application: {e}")
+        
+    finally:
+        # Close the database connection
+        cursor.close()
+        conn.close()
+
+
+# # Function to monitor request counts
+# def monitor_request_counts(log_file="request_counts_log.json"):
+#     """
+#     Fetch and log request counts for each minute.
+#     The counts are reset by the application after each fetch.
+#     """
+#     url = "http://localhost:8081/monitor/request_counts"
+    
+#     # Connect to the database
+#     conn = psycopg2.connect(**DATABASE_CONFIG)
+#     cursor = conn.cursor()
+
+#     try:
+#         response = requests.get(url)
+#         if response.status_code == 200:
+#             data = response.json()
+#             log_data = {
+#                 "timestamp": datetime.now().isoformat(),  # Current timestamp
+#                 "endpoints": data.get("request_counts", {})  # Log request counts
+#             }
+            
+#             # # Write log data to a JSON file
+#             # with open(log_file, "a") as f:
+#             #     f.write(json.dumps(log_data) + "\n")
+            
+#             # print(f"[{log_data['timestamp']}] Logged Request Counts: {log_data['endpoints']}")
+
+#             # Insert data into the database
+#             for endpoint, count in log_data["endpoints"].items():
+#                 insert_endpoint_data(cursor, endpoint, count, log_data["timestamp"])
+            
+#             # Commit the transaction
+#             conn.commit()
+        
+#         else:
+#             print(f"Failed to retrieve request counts. Status Code: {response.status_code}")
+    
+#     except Exception as e:
+#         print(f"[ERROR] Error connecting to the application: {e}")
+    
+#     finally:
+#         # Close the database connection
+#         cursor.close()
+#         conn.close()
+        
 
 def main():
     """
@@ -339,69 +595,6 @@ def main():
 # Function to insert or update endpoint data
 
 
-def insert_endpoint_data(cursor, endpoint_name, request_count, timestamp):
-    """
-    Insert the request count and timestamp for an endpoint into the database.
-    Each entry is stored as a new row with a unique ID.
-    """
-    try:
-        # Insert a new record into the table
-        cursor.execute('''
-            INSERT INTO endpoints (name_endpoints, request_counts, last_updated)
-            VALUES (%s, %s, %s);
-        ''', (endpoint_name, request_count, timestamp))
-        print(f"[INFO] Successfully inserted data for endpoint '{endpoint_name}'.")
-    except Exception as e:
-        print(f"[ERROR] Failed to insert data for endpoint '{endpoint_name}': {e}")
-
-
-
-
-# Function to monitor request counts
-def monitor_request_counts(log_file="request_counts_log.json"):
-    """
-    Fetch and log request counts for each minute.
-    The counts are reset by the application after each fetch.
-    """
-    url = "http://localhost:8081/monitor/request_counts"
-    
-    # Connect to the database
-    conn = psycopg2.connect(**DATABASE_CONFIG)
-    cursor = conn.cursor()
-
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            data = response.json()
-            log_data = {
-                "timestamp": datetime.now().isoformat(),  # Current timestamp
-                "endpoints": data.get("request_counts", {})  # Log request counts
-            }
-            
-            # # Write log data to a JSON file
-            # with open(log_file, "a") as f:
-            #     f.write(json.dumps(log_data) + "\n")
-            
-            # print(f"[{log_data['timestamp']}] Logged Request Counts: {log_data['endpoints']}")
-
-            # Insert data into the database
-            for endpoint, count in log_data["endpoints"].items():
-                insert_endpoint_data(cursor, endpoint, count, log_data["timestamp"])
-            
-            # Commit the transaction
-            conn.commit()
-        
-        else:
-            print(f"Failed to retrieve request counts. Status Code: {response.status_code}")
-    
-    except Exception as e:
-        print(f"[ERROR] Error connecting to the application: {e}")
-    
-    finally:
-        # Close the database connection
-        cursor.close()
-        conn.close()
-
 def monitor_system():
     """
     Continuously monitors the system, collects metrics, and stores them in batches.
@@ -427,7 +620,7 @@ def monitor_system():
                           current_metrics['disk_percent'], current_metrics['network_bytes_sent'], current_metrics['network_bytes_recv']))
             
             print(f"[INFO] Metrics collected and added to the batch. Current batch : {batch}")
-            print(f"[INFO] Current batch size: {len(batch)}")
+            print(f"[INFO] Current batch size: {len(batch)}") 
             # Log file location
             log_file_name = "request_counts_log.json"
             monitor_request_counts(log_file_name)
