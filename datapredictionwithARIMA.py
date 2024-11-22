@@ -151,6 +151,39 @@ def store_prediction(predictions):
     conn.close()
     print("[INFO] Predictions stored successfully.")
 
+def fetch_latest_metrics():
+    """
+    Fetches the most recent metrics from the 'metrics' table for loss calculation.
+    :return: Dictionary of the most recent metric values.
+    """
+    print("[INFO] Fetching the latest metrics from the database...")
+    conn = psycopg2.connect(**DATABASE_CONFIG)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT cpu_percent, memory_percent, disk_percent, network_bytes_sent, network_bytes_recv 
+        FROM metrics 
+        ORDER BY timestamp DESC 
+        LIMIT 1
+    """)
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        latest_metrics = {
+            'cpu_percent': row[0],
+            'memory_percent': row[1],
+            'disk_percent': row[2],
+            'network_bytes_sent': row[3],
+            'network_bytes_recv': row[4]
+        }
+        print(f"[INFO] Latest metrics fetched: {latest_metrics}")
+        return latest_metrics
+    else:
+        print("[WARNING] No recent metrics available for loss calculation.")
+        return None
+
+
 def generate_predictions():
     """
     Generates predictions for all metric types based on all available data and stores them in the database.
@@ -161,7 +194,7 @@ def generate_predictions():
 
     for metric_type, values in metrics_by_type.items():
         print(f"[INFO] Generating prediction for metric: {metric_type}")
-        prediction = predict_future_value_arima(values)  # Use ARIMA-based prediction
+        prediction = predict_future_value_arima(values)  # Use all data in the database
         if prediction:
             print(f"[INFO] Predicted {metric_type}: {prediction:.2f}")
             predictions[metric_type] = prediction
@@ -170,6 +203,32 @@ def generate_predictions():
 
     if predictions:
         store_prediction(predictions)
+        
+        latest_actual = fetch_latest_metrics()
+        if latest_actual:
+            # Calculate loss
+            losses = calculate_loss(predictions, latest_actual)
+            print(f"[INFO] Losses for this prediction cycle: {losses}")
+
+
+def calculate_loss(predicted, actual):
+    """
+    Calculates the Mean Absolute Error (MAE) between predicted and actual values.
+    :param predicted: Dictionary of predicted values.
+    :param actual: Dictionary of actual values.
+    :return: Dictionary of MAE for each metric type.
+    """
+    print("[INFO] Calculating loss...")
+    losses = {}
+    for key in predicted.keys():
+        if key in actual and actual[key] is not None:
+            losses[key] = abs(predicted[key] - actual[key])
+        else:
+            print(f"[WARNING] Missing actual value for {key}. Skipping loss calculation.")
+            losses[key] = None
+
+    print(f"[INFO] Calculated losses: {losses}")
+    return losses
 
 def main():
     """
