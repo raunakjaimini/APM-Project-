@@ -1,5 +1,4 @@
 import psycopg2
-import statistics
 import time
 from datetime import datetime
 
@@ -36,51 +35,51 @@ def setup_database():
     conn.close()
     print("[INFO] Database setup completed.")
 
-
-# def predict_future_value(data_points):
-#     """
-#     Predicts future values using a simple moving average based on all available data.
-#     :param data_points: List of metric values.
-#     :return: Predicted value.
-#     """
-#     print(f"[INFO] Calculating prediction for data points: {data_points}")
-#     if len(data_points) < 1:
-#         print("[WARNING] No data points available to calculate prediction.")
-#         return None
-
-#     moving_avg = statistics.mean(data_points)  # Use all available data for average
-#     print(f"[INFO] Calculated moving average: {moving_avg:.2f}")
-#     prediction = moving_avg + (moving_avg * 0.1)  # Simple trend adjustment
-#     print(f"[INFO] Final prediction with trend adjustment: {prediction:.2f}")
-#     return prediction
-
-def predict_future_value(data_points, alpha=0.2):
+def difference(data, lag=1):
     """
-    Predicts future values using a momentum-based moving average.
-    :param data_points: List of metric values.
-    :param alpha: Weighting factor for recent data (0 < alpha <= 1, default: 0.2).
-    :return: Predicted value.
+    Calculates the differenced series to make the data stationary.
+    :param data: List of values.
+    :param lag: Number of lags for differencing.
+    :return: Differenced series.
     """
-    print(f"[INFO] Calculating prediction for data points: {data_points}")
-    if len(data_points) < 1:
-        print("[WARNING] No data points available to calculate prediction.")
+    return [data[i] - data[i - lag] for i in range(lag, len(data))]
+
+def predict_future_value_arima(data_points, p=2, q=2):
+    """
+    Predicts future values using ARIMA logic.
+    Differencing (difference): Removes trends to make the data stationary.
+    AutoRegressive Component: Uses a weighted sum of the past p observations.
+    Moving Average Component: Uses a weighted sum of past q errors.
+    Combination: Combines AR and MA for final predictions.
+    """
+    print(f"[INFO] Calculating ARIMA-based prediction for data points: {data_points}")
+    if len(data_points) <= max(p, q):
+        print("[WARNING] Not enough data points for ARIMA prediction.")
         return None
 
-    # Initialize MMA with the first data point
-    mma = data_points[0]
+    # Step 1: Make the series stationary by differencing
+    differenced = difference(data_points)
+    
+    # Step 2: Calculate AR component (linear combination of past p values)
+    ar_part = 0
+    for i in range(1, p + 1):
+        ar_part += differenced[-i]  # Use last p differenced values
 
-    # Apply the MMA formula: MMA = alpha * current_value + (1 - alpha) * previous_MMA
-    # here alpha is the weighting factor
-    for value in data_points[1:]:
-        mma = alpha * value + (1 - alpha) * mma
+    # Step 3: Calculate MA component (linear combination of past q errors)
+    ma_part = 0
+    residuals = [0] * len(differenced)  # Initialize residuals
+    for i in range(1, q + 1):
+        if len(residuals) >= i:
+            ma_part += residuals[-i]  # Use last q residuals
 
-    print(f"[INFO] Calculated momentum-based moving average: {mma:.2f}")
+    # Combine AR and MA parts
+    predicted_difference = ar_part + ma_part
 
-    # Add a trend adjustment (10% of the MMA value)
-    prediction = mma + (mma * 0.1)
-    print(f"[INFO] Final prediction with trend adjustment: {prediction:.2f}")
+    # Undo differencing to get final prediction
+    prediction = data_points[-1] + predicted_difference
+
+    print(f"[INFO] ARIMA-based prediction: {prediction:.2f}")
     return prediction
-
 
 def fetch_metrics():
     """
@@ -152,40 +151,6 @@ def store_prediction(predictions):
     conn.close()
     print("[INFO] Predictions stored successfully.")
 
-
-def fetch_latest_metrics():
-    """
-    Fetches the most recent metrics from the 'metrics' table for loss calculation.
-    :return: Dictionary of the most recent metric values.
-    """
-    print("[INFO] Fetching the latest metrics from the database...")
-    conn = psycopg2.connect(**DATABASE_CONFIG)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT cpu_percent, memory_percent, disk_percent, network_bytes_sent, network_bytes_recv 
-        FROM metrics 
-        ORDER BY timestamp DESC 
-        LIMIT 1
-    """)
-    row = cursor.fetchone()
-    conn.close()
-
-    if row:
-        latest_metrics = {
-            'cpu_percent': row[0],
-            'memory_percent': row[1],
-            'disk_percent': row[2],
-            'network_bytes_sent': row[3],
-            'network_bytes_recv': row[4]
-        }
-        print(f"[INFO] Latest metrics fetched: {latest_metrics}")
-        return latest_metrics
-    else:
-        print("[WARNING] No recent metrics available for loss calculation.")
-        return None
-
-
 def generate_predictions():
     """
     Generates predictions for all metric types based on all available data and stores them in the database.
@@ -196,7 +161,7 @@ def generate_predictions():
 
     for metric_type, values in metrics_by_type.items():
         print(f"[INFO] Generating prediction for metric: {metric_type}")
-        prediction = predict_future_value(values)  # Use all data in the database
+        prediction = predict_future_value_arima(values)  # Use ARIMA-based prediction
         if prediction:
             print(f"[INFO] Predicted {metric_type}: {prediction:.2f}")
             predictions[metric_type] = prediction
@@ -205,33 +170,6 @@ def generate_predictions():
 
     if predictions:
         store_prediction(predictions)
-        
-        latest_actual = fetch_latest_metrics()
-        if latest_actual:
-            # Calculate loss
-            losses = calculate_loss(predictions, latest_actual)
-            print(f"[INFO] Losses for this prediction cycle: {losses}")
-
-
-def calculate_loss(predicted, actual):
-    """
-    Calculates the Mean Absolute Error (MAE) between predicted and actual values.
-    :param predicted: Dictionary of predicted values.
-    :param actual: Dictionary of actual values.
-    :return: Dictionary of MAE for each metric type.
-    """
-    print("[INFO] Calculating loss...")
-    losses = {}
-    for key in predicted.keys():
-        if key in actual and actual[key] is not None:
-            losses[key] = abs(predicted[key] - actual[key])
-        else:
-            print(f"[WARNING] Missing actual value for {key}. Skipping loss calculation.")
-            losses[key] = None
-
-    print(f"[INFO] Calculated losses: {losses}")
-    return losses
-
 
 def main():
     """
@@ -257,3 +195,4 @@ def main():
 if __name__ == "__main__":
     print("[INFO] Starting the prediction script...")
     main()
+    

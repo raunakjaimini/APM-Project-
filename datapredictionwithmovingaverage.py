@@ -37,28 +37,10 @@ def setup_database():
     print("[INFO] Database setup completed.")
 
 
-# def predict_future_value(data_points):
-#     """
-#     Predicts future values using a simple moving average based on all available data.
-#     :param data_points: List of metric values.
-#     :return: Predicted value.
-#     """
-#     print(f"[INFO] Calculating prediction for data points: {data_points}")
-#     if len(data_points) < 1:
-#         print("[WARNING] No data points available to calculate prediction.")
-#         return None
-
-#     moving_avg = statistics.mean(data_points)  # Use all available data for average
-#     print(f"[INFO] Calculated moving average: {moving_avg:.2f}")
-#     prediction = moving_avg + (moving_avg * 0.1)  # Simple trend adjustment
-#     print(f"[INFO] Final prediction with trend adjustment: {prediction:.2f}")
-#     return prediction
-
-def predict_future_value(data_points, alpha=0.2):
+def predict_future_value(data_points):
     """
-    Predicts future values using a momentum-based moving average.
+    Predicts future values using a simple moving average based on all available data.
     :param data_points: List of metric values.
-    :param alpha: Weighting factor for recent data (0 < alpha <= 1, default: 0.2).
     :return: Predicted value.
     """
     print(f"[INFO] Calculating prediction for data points: {data_points}")
@@ -66,18 +48,9 @@ def predict_future_value(data_points, alpha=0.2):
         print("[WARNING] No data points available to calculate prediction.")
         return None
 
-    # Initialize MMA with the first data point
-    mma = data_points[0]
-
-    # Apply the MMA formula: MMA = alpha * current_value + (1 - alpha) * previous_MMA
-    # here alpha is the weighting factor
-    for value in data_points[1:]:
-        mma = alpha * value + (1 - alpha) * mma
-
-    print(f"[INFO] Calculated momentum-based moving average: {mma:.2f}")
-
-    # Add a trend adjustment (10% of the MMA value)
-    prediction = mma + (mma * 0.1)
+    moving_avg = statistics.mean(data_points)  # Use all available data for average
+    print(f"[INFO] Calculated moving average: {moving_avg:.2f}")
+    prediction = moving_avg + (moving_avg * 0.1)  # Simple trend adjustment
     print(f"[INFO] Final prediction with trend adjustment: {prediction:.2f}")
     return prediction
 
@@ -153,39 +126,6 @@ def store_prediction(predictions):
     print("[INFO] Predictions stored successfully.")
 
 
-def fetch_latest_metrics():
-    """
-    Fetches the most recent metrics from the 'metrics' table for loss calculation.
-    :return: Dictionary of the most recent metric values.
-    """
-    print("[INFO] Fetching the latest metrics from the database...")
-    conn = psycopg2.connect(**DATABASE_CONFIG)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT cpu_percent, memory_percent, disk_percent, network_bytes_sent, network_bytes_recv 
-        FROM metrics 
-        ORDER BY timestamp DESC 
-        LIMIT 1
-    """)
-    row = cursor.fetchone()
-    conn.close()
-
-    if row:
-        latest_metrics = {
-            'cpu_percent': row[0],
-            'memory_percent': row[1],
-            'disk_percent': row[2],
-            'network_bytes_sent': row[3],
-            'network_bytes_recv': row[4]
-        }
-        print(f"[INFO] Latest metrics fetched: {latest_metrics}")
-        return latest_metrics
-    else:
-        print("[WARNING] No recent metrics available for loss calculation.")
-        return None
-
-
 def generate_predictions():
     """
     Generates predictions for all metric types based on all available data and stores them in the database.
@@ -205,32 +145,6 @@ def generate_predictions():
 
     if predictions:
         store_prediction(predictions)
-        
-        latest_actual = fetch_latest_metrics()
-        if latest_actual:
-            # Calculate loss
-            losses = calculate_loss(predictions, latest_actual)
-            print(f"[INFO] Losses for this prediction cycle: {losses}")
-
-
-def calculate_loss(predicted, actual):
-    """
-    Calculates the Mean Absolute Error (MAE) between predicted and actual values.
-    :param predicted: Dictionary of predicted values.
-    :param actual: Dictionary of actual values.
-    :return: Dictionary of MAE for each metric type.
-    """
-    print("[INFO] Calculating loss...")
-    losses = {}
-    for key in predicted.keys():
-        if key in actual and actual[key] is not None:
-            losses[key] = abs(predicted[key] - actual[key])
-        else:
-            print(f"[WARNING] Missing actual value for {key}. Skipping loss calculation.")
-            losses[key] = None
-
-    print(f"[INFO] Calculated losses: {losses}")
-    return losses
 
 
 def main():

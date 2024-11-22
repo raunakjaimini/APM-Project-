@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 import zlib  # For data compression
 import requests
+from psycopg2 import sql, connect
 
 # Configuration for the PostgreSQL database
 DATABASE_CONFIG = {
@@ -17,7 +18,7 @@ DATABASE_CONFIG = {
     'port': '6543'
 }
 
-# user=postgres.cwkrmwnrdglcuffvlhss password=[YOUR-PASSWORD] host=aws-0-ap-south-1.pooler.supabase.com port=6543 dbname=postgres
+
 
 # Batch size for storing metrics at once
 BATCH_SIZE = 3
@@ -321,16 +322,8 @@ def get_alert_color(defcon_level):
     }
     return colors.get(defcon_level, "Unknown")
 
-from psycopg2 import sql, connect
 
-# Database configuration
-DATABASE_CONFIG = {
-    'dbname': 'postgres',
-    'user': 'postgres.cwkrmwnrdglcuffvlhss',
-    'password': 'R@unak87709',
-    'host': 'aws-0-ap-south-1.pooler.supabase.com',
-    'port': '6543'
-}
+
 
 def get_db_connection():
     """
