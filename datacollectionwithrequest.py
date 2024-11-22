@@ -33,13 +33,14 @@ DEFAULT_DISK_LEVELS = [100, 50, 30, 25, 15, 5, 0]
 
 def setup_database():
     """
-    Sets up the database by creating required tables:
+    Sets up the database by creating required tables :
     1. `metrics` for live system metrics
     2. `metrics_archive` for compressed, archived metrics
     """
     print("[INFO] Setting up the database schema...")
     conn = psycopg2.connect(**DATABASE_CONFIG)
     cursor = conn.cursor()
+    # A cursor object is created to execute SQL queries.
 
     # Create `metrics` table to store live system metrics
     cursor.execute('''
@@ -108,6 +109,7 @@ def setup_database():
 def get_thresholds_from_db():
     """
     Fetches alert thresholds from the database. If not present, returns None.
+    Connects to the database and retrieves all metric_type and levels from the thresholds table.
     """
     conn = psycopg2.connect(**DATABASE_CONFIG)
     cursor = conn.cursor()
@@ -139,6 +141,8 @@ def update_thresholds_in_db(cpu_levels, ram_levels, disk_levels):
             ON CONFLICT (metric_type)
             DO UPDATE SET levels = EXCLUDED.levels
         ''', (metric, json.dumps(levels)))
+        # EXCLUDED.levels: Refers to the new value in case of conflict.
+        
 
     conn.commit()
     conn.close()
@@ -236,7 +240,9 @@ def move_and_delete_oldest_entries(cursor, excess_entries):
             'network_bytes_sent': bytes_sent,
             'network_bytes_recv': bytes_recv
         }
-
+        # Converts the data dictionary to a JSON string using json.dumps().
+        # Encodes the JSON string as a UTF-8 byte string.
+        # Compresses the byte string using zlib.compress().
         # Compress the data using zlib
         compressed_data = zlib.compress(json.dumps(data).encode('utf-8'))
 
