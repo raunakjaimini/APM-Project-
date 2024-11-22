@@ -244,13 +244,13 @@ def main():
 
     # Wait for 5 minutes before starting the first prediction cycle
     print("[INFO] Waiting for 5 minutes before starting the first prediction cycle...")
-    time.sleep(30)  # Delay before starting first cycle (5 minutes)
+    time.sleep(30)  # Delay before starting first cycle (0.5 minutes)
 
     while True:
         try:
             generate_predictions()
             print("[INFO] Sleeping for 5 minutes before the next prediction cycle...")
-            time.sleep(120)  # Run every 5 minutes
+            time.sleep(120)  # Run every 2 minutes
         except Exception as e:
             print(f"[ERROR] Error during prediction: {e}")
 
